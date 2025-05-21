@@ -48,7 +48,7 @@ List V53a records with pagination and optional filtering.
 - `page`: Page number (default: 1)
 - `page_size`: Number of items per page (default: 10)
 - `id`: Filter by ID
-- `did`: Filter by Device ID
+- `did`: Date ID in YYMMDD format
 
 **Response:**
 ```json
@@ -94,12 +94,12 @@ Retrieve a specific V53a record by ID.
 
 ### `GET /api/v53a/{did}/last-elements/`
 
-Get the last elements of various data arrays for a specific Device ID.
+Get the last elements of various data arrays for a specific Date ID.
 
 **Authentication:** Token required
 
 **URL Parameters:**
-- `did`: Device ID to fetch the last elements for
+- `did`: Date ID to fetch the last elements for
 
 **Response:**
 ```json
@@ -157,7 +157,7 @@ The API provides consistent error responses:
 V53a records contain numerous data fields including:
 
 - `id`: Record identifier
-- `did`: Device identifier
+- `did`: Date ID 
 - `ctime`: Time data array (formatted string)
 - `ts`: Timestamp of record creation
 - Various array fields for market data series:
