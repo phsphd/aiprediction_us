@@ -161,9 +161,9 @@ V53a records contain numerous data fields including:
 - `ctime`: Time data array (formatted string)
 - `ts`: Timestamp of record creation
 - Various array fields for market data series:
-  - `sp`, `spysp`, `spy`: S&P and SPY data 
-  - `qqqsp`, `qqq`: QQQ data
+  - `sp`, `spysp`, `spy`: S&P and SPY market data
+  - `qqqsp`, `qqq`: QQQ market data
   - `es`: E-mini S&P futures
-  - `p1`-`p14`: Price data series
-  - `c1`-`c14`: Corresponding calculation series
+  - `p1`-`p14`: Put data series
+  - `c1`-`c14`: Call data series
 - Additional fields like `strike1`, `strike2` for option strike prices
