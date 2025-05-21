@@ -276,6 +276,255 @@ class ApiClient {
   }
 
   /**
+   * Generate a timestamped filename for saving data
+   * @param {string} prefix - Prefix for the filename
+   * @param {string|number} [identifier=null] - Optional identifier (e.g., DID, ID)
+   * @param {string} [extension='json'] - File extension
+   * @returns {string} Generated filename
+   * @private
+   */
+  _generateFilename(prefix, identifier = null, extension = 'json') {
+    const timestamp = new Date().toISOString()
+      .replace(/:/g, '-')
+      .replace(/\..+/, '')
+      .replace('T', '_');
+    
+    let filename = `${prefix}_${timestamp}`;
+    if (identifier !== null) {
+      filename += `_${identifier}`;
+    }
+    
+    return `${filename}.${extension}`;
+  }
+
+  /**
+   * Save data to a JSON file
+   * @param {Object|Array} data - Data to save
+   * @param {string} [filename=null] - Optional filename
+   * @param {boolean} [download=true] - Whether to trigger browser download
+   * @returns {Promise<string>} Filename or Blob URL if successful
+   * @throws {Error} If saving fails
+   */
+  async saveToJson(data, filename = null, download = true) {
+    try {
+      // Generate filename if not provided
+      if (!filename) {
+        // Check if it's a record with a DID
+        const identifier = data.did || (data.results?.[0]?.did ? 'all' : null);
+        const prefix = identifier === 'all' ? 'records' : 'record';
+        filename = this._generateFilename(prefix, identifier);
+      }
+      
+      // Format the data
+      const jsonString = JSON.stringify(data, null, 2);
+      
+      if (download) {
+        // Create a blob and trigger download
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        
+        // Clean up
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }, 100);
+        
+        console.log(`Data saved to ${filename}`);
+        return filename;
+      } else {
+        // Return the data as a blob URL (for preview or other uses)
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        console.log(`Data prepared as blob URL: ${url}`);
+        return url;
+      }
+    } catch (error) {
+      console.error('Error saving JSON:', error);
+      throw new Error(`Failed to save JSON file: ${error.message}`);
+    }
+  }
+
+  /**
+   * Fetch and save a record by DID
+   * @param {number} did - DID of the record to fetch and save
+   * @param {string} [filename=null] - Optional filename
+   * @param {boolean} [saveAllRecords=false] - Whether to also save all records
+   * @returns {Promise<Object>} Object with saved filenames and record data
+   */
+  async fetchAndSaveRecord(did, filename = null, saveAllRecords = false) {
+    try {
+      console.log(`Fetching record with DID: ${did}`);
+      
+      // Get all records first
+      const allRecordsData = await this.getV53aList(1, 50, {});
+      let records = allRecordsData.results || allRecordsData;
+      
+      // Find the target record with the specified DID
+      const targetRecord = records.find(record => record.did === parseInt(did));
+      
+      if (!targetRecord) {
+        throw new Error(`No record found with DID ${did}`);
+      }
+      
+      console.log(`Found record with DID ${did}`);
+      
+      // Save files and return results
+      const result = {
+        targetRecord,
+        filenames: {}
+      };
+      
+      // Save target record
+      if (filename) {
+        result.filenames.record = await this.saveToJson(targetRecord, filename);
+      } else {
+        result.filenames.record = await this.saveToJson(targetRecord);
+      }
+      
+      // Save all records if requested
+      if (saveAllRecords) {
+        const allRecordsFilename = filename ? `all_${filename}` : null;
+        result.filenames.allRecords = await this.saveToJson(allRecordsData, allRecordsFilename);
+      }
+      
+      return result;
+    } catch (error) {
+      console.error(`Error fetching and saving record with DID ${did}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Debug a record's structure
+   * @param {Object} record - Record to debug
+   * @returns {Object} Debug information
+   */
+  debugRecordStructure(record) {
+    // Generate record structure info similar to the Python script
+    const debug = {
+      fields: {},
+      arrayFields: {},
+      listFields: {}
+    };
+    
+    // Check all fields
+    for (const [key, value] of Object.entries(record)) {
+      const valueType = Array.isArray(value) ? 'array' : typeof value;
+      const valuePreview = JSON.stringify(value).substring(0, 100) + 
+        (JSON.stringify(value).length > 100 ? '...' : '');
+      
+      debug.fields[key] = { type: valueType, preview: valuePreview };
+      
+      // Check for array fields
+      if (Array.isArray(value)) {
+        debug.listFields[key] = {
+          length: value.length,
+          firstElement: value.length > 0 ? value[0] : null,
+          lastElement: value.length > 0 ? value[value.length - 1] : null
+        };
+      }
+    }
+    
+    // Check for expected array fields
+    const expectedFields = ['sp_array', 'es_array', 'p1_array', 'c1_array', 'p2_array', 'c2_array', 
+                            'p3_array', 'c3_array', 'p4_array', 'c4_array', 'p5_array', 'c5_array', 
+                            'p6_array', 'c6_array', 'p7_array', 'c7_array'];
+                            
+    for (const field of expectedFields) {
+      if (field in record) {
+        const value = record[field];
+        if (Array.isArray(value)) {
+          debug.arrayFields[field] = {
+            length: value.length,
+            firstElement: value.length > 0 ? value[0] : null,
+            lastElement: value.length > 0 ? value[value.length - 1] : null
+          };
+        } else {
+          debug.arrayFields[field] = { type: typeof value, isArray: false };
+        }
+      } else {
+        debug.arrayFields[field] = { found: false };
+      }
+    }
+    
+    return debug;
+  }
+
+  /**
+   * Fetch, save, and debug a record by DID
+   * @param {number} did - DID of the record to process
+   * @param {string} [filename=null] - Optional filename
+   * @param {boolean} [saveAllRecords=true] - Whether to also save all records
+   * @returns {Promise<Object>} Processing results
+   */
+  async processRecord(did, filename = null, saveAllRecords = true) {
+    try {
+      // Fetch and save the record
+      const saveResult = await this.fetchAndSaveRecord(did, filename, saveAllRecords);
+      
+      // Debug the record structure
+      const debugInfo = this.debugRecordStructure(saveResult.targetRecord);
+      
+      // Print debug info
+      console.log("\n=== RECORD STRUCTURE ===");
+      
+      console.log("\nFields in the record:");
+      Object.entries(debugInfo.fields).forEach(([key, info]) => {
+        console.log(`- ${key} (${info.type}): ${info.preview}`);
+      });
+      
+      console.log("\nLooking for array fields:");
+      Object.entries(debugInfo.arrayFields).forEach(([key, info]) => {
+        if (info.found === false) {
+          console.log(`- ${key}: Not found in record`);
+        } else if (info.isArray === false) {
+          console.log(`- ${key}: Not an array, but ${info.type}`);
+        } else {
+          console.log(`- ${key}: Array with ${info.length} elements`);
+          if (info.length > 0) {
+            console.log(`  First element: ${JSON.stringify(info.firstElement)}`);
+            console.log(`  Last element: ${JSON.stringify(info.lastElement)}`);
+          } else {
+            console.log(`  Array is empty`);
+          }
+        }
+      });
+      
+      console.log("\nSearching for any list fields:");
+      Object.entries(debugInfo.listFields).forEach(([key, info]) => {
+        console.log(`- ${key}: List with ${info.length} elements`);
+        if (info.length > 0) {
+          console.log(`  First element: ${JSON.stringify(info.firstElement)}`);
+          console.log(`  Last element: ${JSON.stringify(info.lastElement)}`);
+        } else {
+          console.log(`  List is empty`);
+        }
+      });
+      
+      // Print information about saved files
+      console.log("\nRecord saved to file:", saveResult.filenames.record);
+      if (saveResult.filenames.allRecords) {
+        console.log("All records saved to file:", saveResult.filenames.allRecords);
+      }
+      
+      return {
+        record: saveResult.targetRecord,
+        debug: debugInfo,
+        filenames: saveResult.filenames
+      };
+    } catch (error) {
+      console.error(`Error processing record with DID ${did}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Logout - clear the current token
    */
   logout() {
@@ -293,25 +542,42 @@ async function example() {
     // Authenticate
     await client.authenticate('your_username', 'your_password');
     
+    // Process a record (fetch, save, debug)
+    const did = 250520; // Replace with actual DID
+    try {
+      const result = await client.processRecord(did);
+      console.log('Processing complete!');
+    } catch (error) {
+      console.error(`Failed to process record with DID ${did}:`, error.message);
+    }
+    
     // Get V53a list with pagination
     const data = await client.getV53aList(1, 5);
     console.log(`Total records: ${data.count}`);
     console.log(`Records on page: ${data.results.length}`);
+    
+    // Save all records to JSON
+    await client.saveToJson(data, 'all_records.json');
     
     // Get record details
     const recordId = 123; // Replace with actual record ID
     try {
       const record = await client.getV53aDetail(recordId);
       console.log('Record details:', record);
+      
+      // Save record to JSON
+      await client.saveToJson(record, `record_${recordId}.json`);
     } catch (error) {
       console.error(`Failed to get record ${recordId}:`, error.message);
     }
     
     // Get last elements
-    const did = 250520; // Replace with actual DID
     try {
       const elements = await client.getLastElements(did);
       console.log('Last elements:', elements);
+      
+      // Save last elements to JSON
+      await client.saveToJson(elements, `last_elements_${did}.json`);
     } catch (error) {
       console.error(`Failed to get last elements for DID ${did}:`, error.message);
     }
